@@ -1,8 +1,14 @@
 USE everyloop;
 
+--- översikt över vilka tabeller som finns i databasen. 
+SELECT name
+FROM sys.tables
+ORDER BY name;
+
 --- MOONMISSIONS
 SELECT TOP 10 * FROM MoonMissions;
 
+DROP TABLE IF EXISTS SuccessfulMissions; 
 -- successful moon missions
 SELECT 
     Spacecraft,
@@ -222,3 +228,104 @@ GROUP BY Gender;
 GO
 
 --- COMPANY (JOINS)
+
+SELECT TOP 10 * FROM company.products;
+
+--- Visar en lista över produkter tillsammans med deras leverantörsnamn och kategorinamn.
+SELECT
+    p.Id,
+    p.ProductName AS Product,
+    s.CompanyName AS Supplier,
+    c.CategoryName AS Category
+FROM company.products p
+JOIN company.suppliers s
+    ON p.SupplierId = s.Id
+JOIN company.categories c
+    ON p.CategoryId = c.Id;
+
+GO
+
+--- Kollar vilka tabeller som finns i company.
+SELECT
+    t.name AS TableName
+FROM sys.tables t
+JOIN sys.schemas s
+    ON t.schema_id = s.schema_id
+WHERE s.name = 'company'
+ORDER BY t.name;
+
+--- kollar vilka kolumner som finns i tabellerna för att se hur de hänger ihop. 
+SELECT TOP 10 * FROM company.employees;
+SELECT TOP 10 * FROM company.regions;
+
+
+--- Då employees och regions inte är direkt kopplade kollar jag 
+--- foreign keys för att se tabellernas relation till varandra.
+SELECT
+    OBJECT_NAME(fk.parent_object_id) AS [From Table],
+    COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS [From Column],
+    OBJECT_NAME(fk.referenced_object_id) AS [→ To Table],
+    COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS [→ To Column]
+FROM sys.foreign_keys fk
+JOIN sys.foreign_key_columns fkc
+    ON fk.object_id = fkc.constraint_object_id
+WHERE OBJECT_NAME(fk.parent_object_id) IN 
+    ('employees', 'employee_territory', 'territories', 'regions')
+ORDER BY [From Table];
+--- visar relationen mellan tabellerna: 
+--- employees.Id = employee_territory.EmployeeId -> 
+--- employee_territory.TerritoryId = territories.Id -> 
+--- territories.RegionId = regions.Id -> 
+--- Och då kan vi koppla company.regions till employee.Id (regions.RegionDescription)
+
+--- Kollar även på tabellerna employee_territory och territories. 
+SELECT TOP 10 * FROM company.employee_territory;
+SELECT TOP 10 * FROM company.territories;
+
+
+--- Visar en lista över regioner tillsammans med 
+--- antalet anställda som är verksamma i varje region.
+--- Då Employee Id och Region Id inte finns i samma tabell, 
+--- krävs flera JOINs för att koppla ihop tabellerna Employees, 
+--- EmployeeTerritories, Territories och Regions.
+--- DESTINCT används för att räkna unika anställda, 
+--- eftersom en anställd kan vara verksam i flera regioner.
+SELECT
+    r.RegionDescription AS Region,
+    COUNT(DISTINCT e.Id) AS [Employee count]
+FROM company.regions r
+JOIN company.territories t
+    ON r.Id = t.RegionId
+JOIN company.employee_territory et
+    ON t.Id = et.TerritoryId
+JOIN company.employees e
+    ON et.EmployeeId = e.Id
+GROUP BY r.RegionDescription;
+
+GO
+
+--- översikt över tabellen och dess kolumner
+SELECT TOP 10 * FROM company.employees;
+
+--- väljer de kolumner som är relevanta utifrån uppgiften för att förstå hierarkin i företaget. 
+SELECT 
+    Id,
+    Title, 
+    FirstName, 
+    LastName,
+    ReportsTo
+FROM company.employees;
+
+--- 
+SELECT
+    e.Id,
+    CONCAT(e.Title, ' ', e.FirstName, ' ', e.LastName) AS Name,
+    CASE
+        WHEN e.ReportsTo IS NULL THEN 'Nobody!'
+        ELSE CONCAT(m.Title, ' ', m.FirstName, ' ', m.LastName)
+    END AS [Reports to]
+FROM company.employees e
+LEFT JOIN company.employees m
+    ON e.ReportsTo = m.Id;
+
+GO
