@@ -44,8 +44,10 @@ ORDER BY Operator;
 GO
 
 --- Tar bort eventuella parenteser och text inom parentes i Spacecraft-kolumnen.
+--- Samt TRIM för att ta bort eventuella mellanslag som kan finnas kvar efter 
+--- att parenteser tagits bort.
 UPDATE SuccessfulMissions
-SET Spacecraft = LEFT(Spacecraft, CHARINDEX('(', Spacecraft) - 1)
+SET Spacecraft = TRIM(LEFT(Spacecraft, CHARINDEX('(', Spacecraft) - 1))
 WHERE Spacecraft LIKE '%(%';
 
 GO
@@ -76,13 +78,12 @@ ORDER BY
 GO
 
 --- USERS
+DROP TABLE IF EXISTS NewUsers;
 
 SELECT TOP 10 * FROM Users;
 
 --- Skapar en ny tabell NewUsers där vi kombinerar förnamn och efternamn till en fullständig namnkolumn,
 --- samt använder en CASE-sats för att bestämma kön baserat på det näst sista tecknet i ID-kolumnen.
-
-DROP TABLE IF EXISTS NewUsers;
 SELECT
     Id,
     Username,
@@ -141,40 +142,41 @@ UPDATE NewUsers SET Username = 'felb£r' WHERE Id = '880706-3713';
 UPDATE NewUsers SET Username = 's1gpet' WHERE Id = '580802-4175';
 UPDATE NewUsers SET Username = 'sigp£t' WHERE Id = '630303-4894';
 
+--- Visa de uppdaterade användarnamnen för tydlighet
+SELECT Id, Username
+FROM NewUsers
+WHERE Id IN ('880706-3713', '580802-4175', '630303-4894')
+ORDER BY Id;
+
+GO
+
 --- kollar om dubbletterna har åtgärdats
-SELECT *
+SELECT
+    Username,
+    COUNT(*) AS [Duplicate count]
 FROM NewUsers
-WHERE Username IN (
-    SELECT Username
-    FROM NewUsers
-    GROUP BY Username
-    HAVING COUNT(*) > 1
-)
-ORDER BY Username;
+GROUP BY Username
+HAVING COUNT(*) > 1;
 
-GO 
+GO
 
---- Visar alla kvinnliga användare vars ID börjar med ett nummer mellan 26 och 69.
---- spannet 26-69 är valt eftersom personnumret endast består av tiotal, 
---- får anta att personer födda ex 20 är födda 2020. 
---- (istället för ex WHERE BirthDate < '1970-01-01')
+--- Visar alla kvinnliga användare i tabellen NewUsers, 
+--- sorterade efter ID i fallande ordning.
 SELECT *
 FROM NewUsers
 WHERE Gender = 'Female'
-AND LEFT(Id, 2) BETWEEN '26' AND '69';  
+ORDER BY Id DESC;
+--- Inga födda efter 1999, vilket innebär att alla är födda på 1900-talet.
 
---- tar bort alla kvinnor inom det angivna spannet
+--- Tar bort alla kvinnor födda innan 1970.
 DELETE FROM NewUsers
-WHERE Gender = 'Female'
-AND (
-    LEFT(Id, 2) BETWEEN '26' AND '69'
-);
+WHERE (LEFT(Id, 2)) < '70' AND Gender = 'Female';
 
---- kollar så att alla kvinnor inom det angivna spannet har tagits bort
+--- kollar så att alla kvinnor innan 1970 har tagits bort
 SELECT *
 FROM NewUsers
 WHERE Gender = 'Female'
-AND LEFT(Id, 2) BETWEEN '26' AND '69'; 
+ORDER BY Id DESC;
 
 GO
 
@@ -207,6 +209,10 @@ WHERE Name = 'Test Person';
 
 GO
 
+SELECT *
+FROM NewUsers
+ORDER BY Id DESC;
+
 --- Beräknar den genomsnittliga åldern för användare i tabellen NewUsers, 
 --- grupperat efter kön. lägger till århundrade, sedan DATEDIFF för att 
 --- räkna ut åldern baserat på födelsedatum och dagens datum (GETDATE).
@@ -214,11 +220,7 @@ SELECT
     Gender,
     FLOOR(AVG(
         DATEDIFF(YEAR, 
-            CASE 
-                WHEN LEFT(Id, 2) BETWEEN '00' AND '25'
-                    THEN CONVERT(date, '20' + LEFT(Id, 6))
-                ELSE CONVERT(date, '19' + LEFT(Id, 6))
-            END,
+            CONVERT(date, '19' + LEFT(Id, 6)),
             GETDATE()
         )
     )) AS [Average age]
@@ -310,19 +312,20 @@ SELECT TOP 10 * FROM company.employees;
 --- väljer de kolumner som är relevanta utifrån uppgiften för att förstå hierarkin i företaget. 
 SELECT 
     Id,
-    Title, 
+    TitleOfCourtesy,
     FirstName, 
     LastName,
     ReportsTo
 FROM company.employees;
 
---- 
+--- Joinar tabellen Employees med sig själv för att visa varje anställds namn 
+--- tillsammans med namnet på den person de rapporterar till.
 SELECT
     e.Id,
-    CONCAT(e.Title, ' ', e.FirstName, ' ', e.LastName) AS Name,
+    CONCAT(e.TitleOfCourtesy, ' ', e.FirstName, ' ', e.LastName) AS Name,
     CASE
         WHEN e.ReportsTo IS NULL THEN 'Nobody!'
-        ELSE CONCAT(m.Title, ' ', m.FirstName, ' ', m.LastName)
+        ELSE CONCAT(m.TitleOfCourtesy, ' ', m.FirstName, ' ', m.LastName)
     END AS [Reports to]
 FROM company.employees e
 LEFT JOIN company.employees m
