@@ -12,8 +12,6 @@ INTO SuccessfulMissions
 FROM MoonMissions
 WHERE Outcome = 'Successful';
 
-GO
-
 --- Visar de 10 första raderna i tabellen SuccessfulMissions 
 --- för att verifiera att data har överförts korrekt.
 SELECT TOP 10 * 
@@ -24,8 +22,6 @@ GO
 --- Tar bort eventuella mellanslag i början eller slutet av Operator-kolumnen. 
 UPDATE SuccessfulMissions
 SET Operator = TRIM(Operator);
-
-GO
 
 --- DISTINCT för att få unika värden. Genom ORDER BY sorteras dessa alfabetiskt, 
 --- vilket gör att vi lätt kan se om mellanslag har tagits bort eller inte.
@@ -41,8 +37,6 @@ GO
 UPDATE SuccessfulMissions
 SET Spacecraft = TRIM(LEFT(Spacecraft, CHARINDEX('(', Spacecraft) - 1))
 WHERE Spacecraft LIKE '%(%';
-
-GO
 
 --- DISTINCT för att få unika värden. Genom ORDER BY sorteras dessa alfabetiskt,
 --- vilket gör att vi lätt kan se om parenteser har tagits bort eller inte.
@@ -72,6 +66,8 @@ GO
 --- USERS
 DROP TABLE IF EXISTS NewUsers;
 
+--- Skapar en ny tabell NewUsers där vi kombinerar förnamn och efternamn till en namnkolumn,
+--- samt använder en CASE-sats för kön baserat på det näst sista tecknet i ID-kolumnen.
 SELECT
     Id,
     Username,
@@ -126,14 +122,6 @@ GROUP BY Username
 HAVING COUNT(*) > 1;
 
 GO
-
---- Visar alla kvinnliga användare i tabellen NewUsers, 
---- sorterade efter ID i fallande ordning.
-SELECT *
-FROM NewUsers
-WHERE Gender = 'Female'
-ORDER BY Id DESC;
---- Inga födda efter 1999, vilket innebär att alla är födda på 1900-talet.
 
 --- Tar bort alla kvinnor födda innan 1970.
 DELETE FROM NewUsers
