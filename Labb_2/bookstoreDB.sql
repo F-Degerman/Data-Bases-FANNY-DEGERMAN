@@ -6,61 +6,60 @@ USE BookStoreDB;
 GO
 
 -- Återsställer tabellerna (om de redan körts tidigare)
-DELETE FROM OrderRows;
-DELETE FROM Orders;
-DELETE FROM Inventory;
-DELETE FROM BookAuthors;
-DELETE FROM Books;
-DELETE FROM Customers;
-DELETE FROM Stores;
-DELETE FROM Publishers;
-DELETE FROM Authors;
-
--- återställer identity-seed för tabellerna så att nya rader börjar på 1 igen 
--- (vid körning av skriptet flera gånger) 
-DBCC CHECKIDENT ('Authors', RESEED, 0);
-DBCC CHECKIDENT ('Publishers', RESEED, 0);
-DBCC CHECKIDENT ('Stores', RESEED, 0);
-DBCC CHECKIDENT ('Customers', RESEED, 0);
-DBCC CHECKIDENT ('Books', RESEED, 0);
-DBCC CHECKIDENT ('Inventory', RESEED, 0);
-DBCC CHECKIDENT ('Orders', RESEED, 0);
-DBCC CHECKIDENT ('OrderRows', RESEED, 0);
+DROP VIEW IF EXISTS TitlarPerFörfattare;
+DROP VIEW IF EXISTS BestSellingBooks; 
 
 GO
 
-/* =====================================================
-    AUTHORS
-===================================================== */
+DROP PROCEDURE IF EXISTS FlyttaBok;
+
+GO
+
+DROP TABLE IF EXISTS OrderRows;
+DROP TABLE IF EXISTS Orders;
+DROP TABLE IF EXISTS Inventory;
+DROP TABLE IF EXISTS BookAuthors;
+DROP TABLE IF EXISTS Books;
+DROP TABLE IF EXISTS Customers;
+DROP TABLE IF EXISTS Stores;
+DROP TABLE IF EXISTS Publishers;
+DROP TABLE IF EXISTS Authors;
+
+GO
+
+/* ============================================================
+    Grundtabeller (kärnentiteter med 1NF) och deras data    
+============================================================ */
+
+/* -------------------- AUTHORS -------------------- */
 
 -- Skapar "Authors"-Tabellen.
--- AuthorID är auto-genererad som primärnyckel.
+-- AuthorID är auto-genererad som primary key.
 CREATE TABLE Authors (
     AuthorID INT IDENTITY(1,1) PRIMARY KEY,
     FirstName NVARCHAR(50) NOT NULL,
     LastName NVARCHAR(50) NOT NULL,
-    BirthDate DATE NULL
+    BirthDate DATE NULL,
+    DeathDate DATE NULL
 );
 
 -- Lägger till data i "Authors"-Tabellen.
-INSERT INTO Authors (FirstName, LastName, BirthDate)
+INSERT INTO Authors (FirstName, LastName, BirthDate, DeathDate)
 VALUES
-('Astrid', 'Lindgren', '1907-11-14'),
-('George', 'Orwell', '1903-06-25'),
-('J.K.', 'Rowling', '1965-07-31'),
-('Tove', 'Jansson', '1914-08-09');
+('Astrid', 'Lindgren', '1907-11-14', '2002-01-28'),
+('George', 'Orwell', '1903-06-25', '1950-01-21'),
+('J.K.', 'Rowling', '1965-07-31', NULL),
+('Tove', 'Jansson', '1914-08-09', '2001-06-27');
 
 SELECT *
 FROM Authors 
 
 GO
 
-/* =====================================================
-    PUBLISHERS
-===================================================== */
+/* -------------------- PUBLISHERS -------------------- */
 
 -- Skapar "Publishers"-Tabellen. 
--- PublisherID är auto-genererad som primärnyckel.
+-- PublisherID är auto-genererad som primary key.
 CREATE TABLE Publishers (
     PublisherID INT IDENTITY(1,1) PRIMARY KEY,
     Name NVARCHAR(100) NOT NULL,
@@ -78,12 +77,10 @@ FROM Publishers
 
 GO
 
-/* =====================================================
-    STORES
-===================================================== */
+/* -------------------- STORES -------------------- */
 
 -- Skapar "Stores" -Tabellen.
--- StoreID är auto-genererad som primärnyckel.
+-- StoreID är auto-genererad som primary key.
 CREATE TABLE Stores (
     StoreID INT IDENTITY(1,1) PRIMARY KEY,
     Name NVARCHAR(100) NOT NULL,
@@ -102,12 +99,10 @@ FROM Stores
 
 GO
 
-/* =====================================================
-    CUSTOMERS
-===================================================== */
+/* -------------------- CUSTOMERS -------------------- */
 
 -- Skapar "Customers" -Tabellen.
--- CustomerID är auto-genererad som primärnyckel
+-- CustomerID är auto-genererad som primary key
 CREATE TABLE Customers (
     CustomerID INT IDENTITY(1,1) PRIMARY KEY,
     FirstName NVARCHAR(50) NOT NULL,
@@ -127,13 +122,11 @@ FROM Customers
 
 GO
 
-/* =====================================================
-    BOOKS
-===================================================== */
+/* -------------------- BOOKS -------------------- */
 
 -- Skapar "Books" -Tabellen.
--- ISBN13 används som primärnyckel.
--- PublisherID är en sekundärnyckel som refererar till Publishers-tabellen.
+-- ISBN13 används som primary key.
+-- PublisherID är en foreign key som refererar till Publishers-tabellen.
 CREATE TABLE Books (
     ISBN13 CHAR(13) PRIMARY KEY,
     Title NVARCHAR(200) NOT NULL,
@@ -163,14 +156,110 @@ FROM Books
 
 GO
 
-/* =====================================================
-    BookAuthors 
-===================================================== */
+/* ============================================================
+    Transaktions-/lagerhanteringstabeller (hanterar lager och beställningar)  
+============================================================ */
+
+/* -------------------- Inventory -------------------- */
+
+-- Skapar "Inventory"-Tabellen som kopplar butiker till böcker.
+-- StoreID och ISBN13 tillsammans utgör den sammansatta primary key.
+-- StoreID är en foreign key som refererar till Stores-tabellen.
+-- ISBN13 är en foreign key som refererar till Books-tabellen.
+CREATE TABLE Inventory (
+    StoreID INT NOT NULL,
+    ISBN13 CHAR(13) NOT NULL,
+    Quantity INT NOT NULL CHECK (Quantity >= 0),
+    PRIMARY KEY (StoreID, ISBN13),
+    FOREIGN KEY (StoreID) REFERENCES Stores(StoreID),
+    FOREIGN KEY (ISBN13) REFERENCES Books(ISBN13)
+);
+
+-- Lägger till data i "Inventory"-Tabellen.
+INSERT INTO Inventory (StoreID, ISBN13, Quantity)
+VALUES
+(1, '9789129688313', 5),
+(1, '9780451524935', 8),
+(1, '9780747532699', 4),
+(2, '9789129697056', 6),
+(2, '9780141036144', 7),
+(2, '9789129715613', 10),
+(3, '9789129707298', 3),
+(3, '9789129723946', 5),
+(3, '9780141187761', 2),
+(3, '9789129740424', 6);  
+
+SELECT *
+FROM Inventory
+
+GO
+
+/* -------------------- Orders -------------------- */
+
+-- Skapar "Orders"-Tabellen som kopplar kunder till butiker och orderdatum.
+-- OrderID är auto-genererad som primary key.
+-- CustomerID är en foreign key som refererar till Customers-tabellen.
+-- StoreID är en foreign key som refererar till Stores-tabellen.
+CREATE TABLE Orders (
+    OrderID INT IDENTITY(1,1) PRIMARY KEY,
+    CustomerID INT NOT NULL,
+    StoreID INT NOT NULL,
+    OrderDate DATETIME NOT NULL DEFAULT GETDATE(),
+    FOREIGN KEY (CustomerID) REFERENCES Customers(CustomerID),
+    FOREIGN KEY (StoreID) REFERENCES Stores(StoreID)
+);
+
+-- Lägger till data i "Orders"-Tabellen.
+INSERT INTO Orders (CustomerID, StoreID, OrderDate)
+VALUES
+(1, 1, '2026-05-01'),
+(2, 2, '2026-05-02'),
+(3, 3, '2026-05-03');
+
+SELECT *
+FROM Orders
+
+GO
+
+/* -------------------- OrderRows -------------------- */
+
+-- Skapar "OrderRows"-Tabellen som kopplar order till böcker och kvantitet.
+-- OrderRowID är auto-genererad som primary key.
+-- OrderID är en foreign key som refererar till Orders-tabellen.
+-- ISBN13 är en foreign key som refererar till Books-tabellen.
+CREATE TABLE OrderRows (
+    OrderRowID INT IDENTITY(1,1) PRIMARY KEY,
+    OrderID INT NOT NULL,
+    ISBN13 CHAR(13) NOT NULL,
+    Quantity INT NOT NULL CHECK (Quantity > 0),
+    UnitPrice DECIMAL(10,2) NOT NULL CHECK (UnitPrice >= 0),
+    FOREIGN KEY (OrderID) REFERENCES Orders(OrderID),
+    FOREIGN KEY (ISBN13) REFERENCES Books(ISBN13)
+);
+
+-- Lägger till data i "OrderRows"-Tabellen.
+INSERT INTO OrderRows (OrderID, ISBN13, Quantity, UnitPrice)
+VALUES
+(1, '9789129688313', 1, 129.00),
+(1, '9780451524935', 2, 149.00),
+(2, '9780141036144', 1, 119.00),
+(3, '9789129707298', 1, 129.00);
+
+SELECT *
+FROM OrderRows
+
+GO  
+
+/* ============================================================
+    Junction-/kopplingstabell (many-to-many relationer) 
+============================================================ */
+
+/* -------------------- BookAuthors -------------------- */
 
 -- Skapar "BookAuthors" -Tabellen som kopplar böcker till författare. 
--- ISBN13 och AuthorID tillsammans utgör den sammansatta primärnyckeln.
--- ISBN13 är en sekundärnyckel som refererar till Books-tabellen.
--- AuthorID är en sekundärnyckel som refererar till Authors-tabellen.
+-- ISBN13 och AuthorID tillsammans utgör den sammansatta primary key.
+-- ISBN13 är en foreign key som refererar till Books-tabellen.
+-- AuthorID är en foreign key som refererar till Authors-tabellen.
 CREATE TABLE BookAuthors (
     ISBN13 CHAR(13) NOT NULL,
     AuthorID INT NOT NULL,
@@ -196,107 +285,151 @@ VALUES
 SELECT *
 FROM BookAuthors
 
+GO  
+
+/* ============================================================
+    Vyer
+============================================================ */
+
+  /* -------------------- VY: TitlarPerFörfattare -------------------- */
+
+CREATE VIEW TitlarPerFörfattare AS
+SELECT
+    CONCAT(a.FirstName, ' ', a.LastName) AS Namn,
+
+    CONCAT(
+        DATEDIFF(YEAR, a.BirthDate, ISNULL(a.DeathDate, GETDATE())) -
+        CASE 
+            WHEN DATEADD(
+                YEAR, 
+                DATEDIFF(YEAR, a.BirthDate, ISNULL(a.DeathDate, GETDATE())), 
+                a.BirthDate
+            ) > ISNULL(a.DeathDate, GETDATE())
+            THEN 1 
+            ELSE 0 
+        END,
+        ' år'
+    ) AS Ålder,
+
+    CONCAT(COUNT(DISTINCT b.ISBN13), ' st') AS Titlar,
+
+    CONCAT(SUM(b.Price * i.Quantity), ' kr') AS Lagervärde
+
+FROM Authors a
+JOIN BookAuthors ba ON a.AuthorID = ba.AuthorID
+JOIN Books b ON ba.ISBN13 = b.ISBN13
+JOIN Inventory i ON b.ISBN13 = i.ISBN13
+GROUP BY 
+    a.AuthorID,
+    a.FirstName,
+    a.LastName,
+    a.BirthDate,
+    a.DeathDate;
+
 GO
-
-/* =====================================================
-    Inventory
-===================================================== */
-
--- Skapar "Inventory"-Tabellen som kopplar butiker till böcker.
--- StoreID och ISBN13 tillsammans utgör den sammansatta primärnyckeln.
--- StoreID är en sekundärnyckel som refererar till Stores-tabellen.
--- ISBN13 är en sekundärnyckel som refererar till Books-tabellen.
-CREATE TABLE Inventory (
-    StoreID INT NOT NULL,
-    ISBN13 CHAR(13) NOT NULL,
-    Quantity INT NOT NULL,
-    PRIMARY KEY (StoreID, ISBN13),
-    FOREIGN KEY (StoreID) REFERENCES Stores(StoreID),
-    FOREIGN KEY (ISBN13) REFERENCES Books(ISBN13)
-);
-
--- Lägger till data i "Inventory"-Tabellen.
-INSERT INTO Inventory (StoreID, ISBN13, Quantity)
-VALUES
-(1, '9789129688313', 5),
-(1, '9780451524935', 8),
-(1, '9780747532699', 4),
-(2, '9789129697056', 6),
-(2, '9780141036144', 7),
-(2, '9789129715613', 10),
-(3, '9789129707298', 3),
-(3, '9789129723946', 5),
-(3, '9780141187761', 2),
-(3, '9789129740424', 6);  
 
 SELECT *
-FROM Inventory
+FROM TitlarPerFörfattare;
 
 GO
 
-/* =====================================================
-    Orders
-===================================================== */
+ /* -------------------- VY: BestsellingBooks -------------------- */
+ -- Denna vy visar vilka böcker som sålt bäst och hur stor intäkt de gett.
+ -- Bokhandeln kan använda den för att se vilka titlar som bör köpas in i fler exemplar.
 
--- Skapar "Orders"-Tabellen som kopplar kunder till butiker och orderdatum.
--- OrderID är auto-genererad som primärnyckel.
--- CustomerID är en sekundärnyckel som refererar till Customers-tabellen.
--- StoreID är en sekundärnyckel som refererar till Stores-tabellen.
-CREATE TABLE Orders (
-    OrderID INT IDENTITY(1,1) PRIMARY KEY,
-    CustomerID INT NOT NULL,
-    StoreID INT NOT NULL,
-    OrderDate DATETIME NOT NULL DEFAULT GETDATE(),
-    FOREIGN KEY (CustomerID) REFERENCES Customers(CustomerID),
-    FOREIGN KEY (StoreID) REFERENCES Stores(StoreID)
-);
+CREATE VIEW BestSellingBooks AS
+SELECT
+    b.Title,
+    SUM(orw.Quantity) AS TotalSold,
+    SUM(orw.Quantity * orw.UnitPrice) AS Revenue
+FROM OrderRows orw
+JOIN Books b ON orw.ISBN13 = b.ISBN13
+GROUP BY b.Title;
 
--- Lägger till data i "Orders"-Tabellen.
-INSERT INTO Orders (CustomerID, StoreID, OrderDate)
-VALUES
-(1, 1, '2026-05-01'),
-(2, 2, '2026-05-02'),
-(3, 3, '2026-05-03');
+GO
 
 SELECT *
-FROM Orders
+FROM BestSellingBooks
 
 GO
 
-/* =====================================================
-    OrderRows
-===================================================== */
+/* ============================================================
+    Stored Procedures
+============================================================ */
 
--- Skapar "OrderRows"-Tabellen som kopplar order till böcker och kvantitet.
--- OrderRowID är auto-genererad som primärnyckel.
--- OrderID är en sekundärnyckel som refererar till Orders-tabellen.
--- ISBN13 är en sekundärnyckel som refererar till Books-tabellen.
-CREATE TABLE OrderRows (
-    OrderRowID INT IDENTITY(1,1) PRIMARY KEY,
-    OrderID INT NOT NULL,
-    ISBN13 CHAR(13) NOT NULL,
-    Quantity INT NOT NULL,
-    UnitPrice DECIMAL(10,2) NOT NULL,
-    FOREIGN KEY (OrderID) REFERENCES Orders(OrderID),
-    FOREIGN KEY (ISBN13) REFERENCES Books(ISBN13)
-);
+/* -------------------- SP: FlyttaBok -------------------- */
+   -- Denna stored procedure flyttar ett antal exemplar av en bok 
+   -- från en butik till en annan. Den hanterar även fel som kan uppstå,
+   -- t.ex. om det inte finns tillräckligt med böcker i källbutiken eller 
+   -- om butikerna är desamma.
 
--- Lägger till data i "OrderRows"-Tabellen.
-INSERT INTO OrderRows (OrderID, ISBN13, Quantity, UnitPrice)
-VALUES
-(1, '9789129688313', 1, 129.00),
-(1, '9780451524935', 2, 149.00),
-(2, '9780141036144', 1, 119.00),
-(3, '9789129707298', 1, 129.00);
+CREATE PROCEDURE FlyttaBok
+    @FromStoreID INT,
+    @ToStoreID INT,
+    @ISBN13 CHAR(13),
+    @Quantity INT = 1
+AS
+BEGIN
+    SET NOCOUNT ON;
 
-SELECT *
-FROM OrderRows
+    BEGIN TRY
+        BEGIN TRANSACTION;
 
-GO
+        IF @Quantity <= 0
+            THROW 50001, 'Quantity must be greater than 0.', 1;
 
-/* =====================================================
-    TESTING 
-===================================================== */
+        IF @FromStoreID = @ToStoreID
+            THROW 50002, 'FromStoreID and ToStoreID cannot be the same.', 1;
+
+        IF NOT EXISTS (
+            SELECT 1
+            FROM Inventory
+            WHERE StoreID = @FromStoreID
+              AND ISBN13 = @ISBN13
+              AND Quantity >= @Quantity
+        )
+            THROW 50003, 'Not enough books in source store.', 1;
+
+        UPDATE Inventory
+        SET Quantity = Quantity - @Quantity
+        WHERE StoreID = @FromStoreID
+          AND ISBN13 = @ISBN13;
+
+        IF EXISTS (
+            SELECT 1
+            FROM Inventory
+            WHERE StoreID = @ToStoreID
+              AND ISBN13 = @ISBN13
+        )
+        BEGIN
+            UPDATE Inventory
+            SET Quantity = Quantity + @Quantity
+            WHERE StoreID = @ToStoreID
+              AND ISBN13 = @ISBN13;
+        END
+        ELSE
+        BEGIN
+            INSERT INTO Inventory (StoreID, ISBN13, Quantity)
+            VALUES (@ToStoreID, @ISBN13, @Quantity);
+        END
+
+        COMMIT TRANSACTION;
+    END TRY
+
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        THROW;
+    END CATCH
+END;
+
+GO  
+
+
+/* ============================================================
+    Testing av databasens struktur och relationer
+============================================================ */
 
 -- Testar att tabellerna skapats korrekt och att data lagts in som förväntat.
 SELECT * FROM INFORMATION_SCHEMA.TABLES;
@@ -307,14 +440,11 @@ SELECT * FROM INFORMATION_SCHEMA.COLUMNS;
 
 GO
 
-/* =====================================================
-    TESTING AV RELATIONER
-===================================================== */
+/* -------------------- TESTING AV RELATIONER -------------------- */
 
 -- Kollar så att relationerna mellan tabellerna fungerar som de ska 
--- genom att göra några JOINs.
 
--- Inventory, Books och Stores
+/* -------------------- Inventory, Books och Stores -------------------- */
 SELECT 
     b.Title,
     s.Name AS Store,
@@ -325,14 +455,16 @@ JOIN Stores s ON i.StoreID = s.StoreID;
 
 GO
 
--- Books och Publishers
-SELECT *
-FROM Books
-JOIN Publishers ON Books.PublisherID = Publishers.PublisherID;
+/* -------------------- Books och Publishers -------------------- */
+SELECT 
+    b.Title,
+    p.Name AS Publisher
+FROM Books b
+JOIN Publishers p ON b.PublisherID = p.PublisherID;
 
 GO
 
--- BookAuthors, Books och Authors
+/* -------------------- BookAuthors, Books och Authors -------------------- */
 SELECT 
     b.Title,
     a.FirstName,
@@ -343,7 +475,7 @@ JOIN Authors a ON ba.AuthorID = a.AuthorID;
 
 GO
 
--- Orders, Customers och Stores
+/* -------------------- Orders, Customers och Stores -------------------- */
 SELECT 
     o.OrderID,
     c.FirstName,
@@ -356,7 +488,7 @@ JOIN Stores s ON o.StoreID = s.StoreID;
 
 GO
 
--- OrderRows, Orders och Books
+/* -------------------- OrderRows, Orders och Books -------------------- */
 SELECT 
     o.OrderID,
     b.Title,
@@ -368,4 +500,18 @@ JOIN Books b ON orw.ISBN13 = b.ISBN13;
 
 GO
 
-  
+/* -------------------- STORED PROCEDURE FlyttaBok -------------------- */
+
+EXEC FlyttaBok 
+    @FromStoreID = 1,
+    @ToStoreID = 2,
+    @ISBN13 = '9780451524935',
+    @Quantity = 2;
+
+GO
+
+SELECT *
+FROM Inventory
+WHERE ISBN13 = '9780451524935';
+
+GO

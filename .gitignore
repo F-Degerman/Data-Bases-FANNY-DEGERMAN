@@ -1,3 +1,5 @@
+venv/
+
 /private
 __pycache__/
 *.py[codz]
