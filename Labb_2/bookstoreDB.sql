@@ -1,17 +1,46 @@
 
+
+
 -- CREATE DATABASE BookStoreDB;
 -- GO
 
 USE BookStoreDB;
+
+/* ============================================================
+    Procedurer för omkörning av hela skriptet i ett svep
+============================================================ */
+DROP PROCEDURE IF EXISTS TransferBookStock;
+
 GO
 
--- Återsställer tabellerna (om de redan körts tidigare)
-DROP VIEW IF EXISTS TitlarPerFörfattare;
-DROP VIEW IF EXISTS BestSellingBooks; 
+-- återsställer användare och behörigheter (om de redan körts tidigare)
+DROP USER IF EXISTS BookStorePythonUser;
 
 GO
 
-DROP PROCEDURE IF EXISTS FlyttaBok;
+-- master databasen används för att hantera serverlogins, 
+-- så vi måste byta till den innan vi kan ta bort login.
+USE master;
+
+GO
+
+-- Kollar om login "BookStorePythonUser" finns och tar bort det om det gör det,
+IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = 'BookStorePythonUser')
+BEGIN
+    DROP LOGIN BookStorePythonUser;
+END;
+
+GO
+
+USE BookStoreDB;
+
+GO
+
+-- Återsställer tabellerna och vyerna (om de redan körts tidigare)
+DROP VIEW IF EXISTS AuthorStatistics;
+DROP VIEW IF EXISTS CustomerOrderSummary;
+DROP VIEW IF EXISTS BookSearchView; 
+DROP VIEW IF EXISTS BestSellingBooks;
 
 GO
 
@@ -32,7 +61,6 @@ GO
 ============================================================ */
 
 /* -------------------- AUTHORS -------------------- */
-
 -- Skapar "Authors"-Tabellen.
 -- AuthorID är auto-genererad som primary key.
 CREATE TABLE Authors (
@@ -57,9 +85,7 @@ FROM Authors
 GO
 
 /* -------------------- PUBLISHERS -------------------- */
-
 -- Skapar "Publishers"-Tabellen. 
--- PublisherID är auto-genererad som primary key.
 CREATE TABLE Publishers (
     PublisherID INT IDENTITY(1,1) PRIMARY KEY,
     Name NVARCHAR(100) NOT NULL,
@@ -78,9 +104,7 @@ FROM Publishers
 GO
 
 /* -------------------- STORES -------------------- */
-
 -- Skapar "Stores" -Tabellen.
--- StoreID är auto-genererad som primary key.
 CREATE TABLE Stores (
     StoreID INT IDENTITY(1,1) PRIMARY KEY,
     Name NVARCHAR(100) NOT NULL,
@@ -100,9 +124,7 @@ FROM Stores
 GO
 
 /* -------------------- CUSTOMERS -------------------- */
-
 -- Skapar "Customers" -Tabellen.
--- CustomerID är auto-genererad som primary key
 CREATE TABLE Customers (
     CustomerID INT IDENTITY(1,1) PRIMARY KEY,
     FirstName NVARCHAR(50) NOT NULL,
@@ -123,10 +145,7 @@ FROM Customers
 GO
 
 /* -------------------- BOOKS -------------------- */
-
 -- Skapar "Books" -Tabellen.
--- ISBN13 används som primary key.
--- PublisherID är en foreign key som refererar till Publishers-tabellen.
 CREATE TABLE Books (
     ISBN13 CHAR(13) PRIMARY KEY,
     Title NVARCHAR(200) NOT NULL,
@@ -161,11 +180,8 @@ GO
 ============================================================ */
 
 /* -------------------- Inventory -------------------- */
-
 -- Skapar "Inventory"-Tabellen som kopplar butiker till böcker.
--- StoreID och ISBN13 tillsammans utgör den sammansatta primary key.
--- StoreID är en foreign key som refererar till Stores-tabellen.
--- ISBN13 är en foreign key som refererar till Books-tabellen.
+-- StoreID och ISBN13 tillsammans utgör sammansatt primary key.
 CREATE TABLE Inventory (
     StoreID INT NOT NULL,
     ISBN13 CHAR(13) NOT NULL,
@@ -197,9 +213,6 @@ GO
 /* -------------------- Orders -------------------- */
 
 -- Skapar "Orders"-Tabellen som kopplar kunder till butiker och orderdatum.
--- OrderID är auto-genererad som primary key.
--- CustomerID är en foreign key som refererar till Customers-tabellen.
--- StoreID är en foreign key som refererar till Stores-tabellen.
 CREATE TABLE Orders (
     OrderID INT IDENTITY(1,1) PRIMARY KEY,
     CustomerID INT NOT NULL,
@@ -222,11 +235,8 @@ FROM Orders
 GO
 
 /* -------------------- OrderRows -------------------- */
-
 -- Skapar "OrderRows"-Tabellen som kopplar order till böcker och kvantitet.
 -- OrderRowID är auto-genererad som primary key.
--- OrderID är en foreign key som refererar till Orders-tabellen.
--- ISBN13 är en foreign key som refererar till Books-tabellen.
 CREATE TABLE OrderRows (
     OrderRowID INT IDENTITY(1,1) PRIMARY KEY,
     OrderID INT NOT NULL,
@@ -291,11 +301,12 @@ GO
     Vyer
 ============================================================ */
 
-  /* -------------------- VY: TitlarPerFörfattare -------------------- */
-
-CREATE VIEW TitlarPerFörfattare AS
+  /* -------------------- VY: AuthorStatistics (TitlarPerFörfattare) -------------------- */
+  -- Denna vy sammanfattar statistik om författare, inklusive deras namn, ålder (eller livslängd), 
+  -- antal titlar de har skrivit och det totala värdet av deras böcker i lager.
+CREATE VIEW AuthorStatistics AS
 SELECT
-    CONCAT(a.FirstName, ' ', a.LastName) AS Namn,
+    CONCAT(a.FirstName, ' ', a.LastName) AS AuthorName,
 
     CONCAT(
         DATEDIFF(YEAR, a.BirthDate, ISNULL(a.DeathDate, GETDATE())) -
@@ -309,11 +320,11 @@ SELECT
             ELSE 0 
         END,
         ' år'
-    ) AS Ålder,
+    ) AS Age,
 
-    CONCAT(COUNT(DISTINCT b.ISBN13), ' st') AS Titlar,
+    CONCAT(COUNT(DISTINCT b.ISBN13), ' st') AS Titles,
 
-    CONCAT(SUM(b.Price * i.Quantity), ' kr') AS Lagervärde
+    CONCAT(SUM(b.Price * i.Quantity), ' kr') AS InventoryValue
 
 FROM Authors a
 JOIN BookAuthors ba ON a.AuthorID = ba.AuthorID
@@ -329,27 +340,71 @@ GROUP BY
 GO
 
 SELECT *
-FROM TitlarPerFörfattare;
+FROM AuthorStatistics;
 
 GO
 
- /* -------------------- VY: BestsellingBooks -------------------- */
- -- Denna vy visar vilka böcker som sålt bäst och hur stor intäkt de gett.
- -- Bokhandeln kan använda den för att se vilka titlar som bör köpas in i fler exemplar.
-
-CREATE VIEW BestSellingBooks AS
+ /* -------------------- VY: CustomerOrderSummary -------------------- */
+ -- Denna vy sammanfattar kundernas beställningar, inklusive antal beställningar, totalt antal böcker köpta och total spenderad summa.
+ -- Den används för att snabbt få en översikt över kundernas köpbeteende och kan vara användbar för marknadsföring och kundanalys.
+CREATE VIEW CustomerOrderSummary AS
 SELECT
-    b.Title,
-    SUM(orw.Quantity) AS TotalSold,
-    SUM(orw.Quantity * orw.UnitPrice) AS Revenue
-FROM OrderRows orw
-JOIN Books b ON orw.ISBN13 = b.ISBN13
-GROUP BY b.Title;
+    c.CustomerID,
+    CONCAT(c.FirstName, ' ', c.LastName) AS CustomerName,
+    COUNT(DISTINCT o.OrderID) AS NumberOfOrders,
+    SUM(orw.Quantity) AS TotalBooksBought,
+    SUM(orw.Quantity * orw.UnitPrice) AS TotalSpent
+FROM Customers c
+JOIN Orders o ON c.CustomerID = o.CustomerID
+JOIN OrderRows orw ON o.OrderID = orw.OrderID
+GROUP BY 
+    c.CustomerID,
+    c.FirstName,
+    c.LastName;
 
 GO
 
 SELECT *
-FROM BestSellingBooks
+FROM CustomerOrderSummary;
+
+GO
+
+/* -------------------- VY: BookSearchView -------------------- */
+-- Denna vy används i app.py för att söka efter böcker baserat på titel.
+CREATE VIEW BookSearchView AS
+SELECT
+    b.Title,
+    b.ISBN13,
+    s.Name AS Store,
+    i.Quantity
+FROM Books b
+JOIN Inventory i ON b.ISBN13 = i.ISBN13
+JOIN Stores s ON i.StoreID = s.StoreID;
+
+GO
+
+SELECT *
+FROM BookSearchView 
+
+GO
+
+/* ============================================================
+    Användare och behörigheter
+============================================================ */
+
+-- Skapar en SQL Server login och user för att ge åtkomst till databasen,
+-- med specifika behörigheter att läsa från BookSearchView, vilket används i app.py.
+CREATE LOGIN BookStorePythonUser
+WITH PASSWORD = 'StrongPassword123!';
+
+GO
+
+CREATE USER BookStorePythonUser
+FOR LOGIN BookStorePythonUser;
+
+GO
+
+GRANT SELECT ON BookSearchView TO BookStorePythonUser;
 
 GO
 
@@ -357,13 +412,13 @@ GO
     Stored Procedures
 ============================================================ */
 
-/* -------------------- SP: FlyttaBok -------------------- */
+/* -------------------- SP: TransferBookStock -------------------- */
    -- Denna stored procedure flyttar ett antal exemplar av en bok 
    -- från en butik till en annan. Den hanterar även fel som kan uppstå,
    -- t.ex. om det inte finns tillräckligt med böcker i källbutiken eller 
    -- om butikerna är desamma.
 
-CREATE PROCEDURE FlyttaBok
+CREATE PROCEDURE TransferBookStock
     @FromStoreID INT,
     @ToStoreID INT,
     @ISBN13 CHAR(13),
@@ -428,21 +483,10 @@ GO
 
 
 /* ============================================================
-    Testing av databasens struktur och relationer
+    TESTING
 ============================================================ */
 
--- Testar att tabellerna skapats korrekt och att data lagts in som förväntat.
-SELECT * FROM INFORMATION_SCHEMA.TABLES;
-
-GO
-
-SELECT * FROM INFORMATION_SCHEMA.COLUMNS;
-
-GO
-
-/* -------------------- TESTING AV RELATIONER -------------------- */
-
--- Kollar så att relationerna mellan tabellerna fungerar som de ska 
+-- Testar centrala relationer, vyer och stored procedure.
 
 /* -------------------- Inventory, Books och Stores -------------------- */
 SELECT 
@@ -452,15 +496,6 @@ SELECT
 FROM Inventory i
 JOIN Books b ON i.ISBN13 = b.ISBN13
 JOIN Stores s ON i.StoreID = s.StoreID;
-
-GO
-
-/* -------------------- Books och Publishers -------------------- */
-SELECT 
-    b.Title,
-    p.Name AS Publisher
-FROM Books b
-JOIN Publishers p ON b.PublisherID = p.PublisherID;
 
 GO
 
@@ -475,34 +510,40 @@ JOIN Authors a ON ba.AuthorID = a.AuthorID;
 
 GO
 
-/* -------------------- Orders, Customers och Stores -------------------- */
+/* -------------------- Orders, Customers och OrderRows -------------------- */
 SELECT 
     o.OrderID,
-    c.FirstName,
-    c.LastName,
-    s.Name AS Store,
-    o.OrderDate
-FROM Orders o
-JOIN Customers c ON o.CustomerID = c.CustomerID
-JOIN Stores s ON o.StoreID = s.StoreID;
-
-GO
-
-/* -------------------- OrderRows, Orders och Books -------------------- */
-SELECT 
-    o.OrderID,
+    CONCAT(c.FirstName, ' ', c.LastName) AS CustomerName,
     b.Title,
     orw.Quantity,
     orw.UnitPrice
-FROM OrderRows orw
-JOIN Orders o ON orw.OrderID = o.OrderID
+FROM Orders o
+JOIN Customers c ON o.CustomerID = c.CustomerID
+JOIN OrderRows orw ON o.OrderID = orw.OrderID
 JOIN Books b ON orw.ISBN13 = b.ISBN13;
 
 GO
 
-/* -------------------- STORED PROCEDURE FlyttaBok -------------------- */
+/* -------------------- View: AuthorStatistics -------------------- */
+SELECT *
+FROM AuthorStatistics;
 
-EXEC FlyttaBok 
+GO
+
+/* -------------------- View: CustomerOrderSummary -------------------- */
+SELECT *
+FROM CustomerOrderSummary;
+
+GO
+
+/* -------------------- View: BookSearchView -------------------- */
+SELECT *
+FROM BookSearchView;
+
+GO
+
+/* -------------------- Stored Procedure: TransferBookStock -------------------- */
+EXEC TransferBookStock 
     @FromStoreID = 1,
     @ToStoreID = 2,
     @ISBN13 = '9780451524935',
