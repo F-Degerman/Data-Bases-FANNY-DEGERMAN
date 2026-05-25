@@ -40,7 +40,6 @@ GO
 DROP VIEW IF EXISTS AuthorStatistics;
 DROP VIEW IF EXISTS CustomerOrderSummary;
 DROP VIEW IF EXISTS BookSearchView; 
-DROP VIEW IF EXISTS BestSellingBooks;
 
 GO
 
@@ -57,7 +56,7 @@ DROP TABLE IF EXISTS Authors;
 GO
 
 /* ============================================================
-    Grundtabeller (kärnentiteter med 1NF) och deras data    
+    Grundtabeller och deras data    
 ============================================================ */
 
 /* -------------------- AUTHORS -------------------- */
@@ -412,7 +411,7 @@ GO
     Stored Procedures
 ============================================================ */
 
-/* -------------------- SP: TransferBookStock -------------------- */
+/* -------------------- SP: TransferBookStock (FlyttaBok)-------------------- */
    -- Denna stored procedure flyttar ett antal exemplar av en bok 
    -- från en butik till en annan. Den hanterar även fel som kan uppstå,
    -- t.ex. om det inte finns tillräckligt med böcker i källbutiken eller 

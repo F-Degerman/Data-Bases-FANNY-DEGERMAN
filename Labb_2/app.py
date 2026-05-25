@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError, InterfaceError
 import sys
 import getpass
 
@@ -10,12 +11,14 @@ sys.stdin.reconfigure(encoding='utf-8')
 server = r"FANNY\SQLEXPRESS"
 database = "BookStoreDB"
 
-# Användaren anger inloggningsuppgifter.
-db_user = input("Ange användarnamn: ")
-db_password = getpass.getpass("Ange lösenord (texten visas inte medan du skriver): ")
+# Användarnamn och lösenord för SQL Server. 
+# Lösenordet hämtas säkert via getpass så att det inte visas i terminalen.
+db_user = "BookStorePythonUser"
+db_password = getpass.getpass(
+    "Ange lösenord för BookStorePythonUser (Notera att texten du skriver inte visas): "
+)
 
 # Skapar anslutningssträng för SQL Server via ODBC Driver 17.
-# Inloggningsuppgifter skrivs inte direkt i koden.
 connection_string = (
     f"mssql+pyodbc://{db_user}:{db_password}@"
     + server +
@@ -25,9 +28,6 @@ connection_string = (
 
 # Skapar SQLAlchemy engine för databaskopplingen.
 engine = create_engine(connection_string)
-
-# Användaren anger en boktitel att söka efter.
-search_term = input("Sök efter boktitel: ")
 
 # Parameteriserad SQL-fråga som hämtar böcker och lagerstatus.
 # LIKE används för fritextsökning.
@@ -42,22 +42,32 @@ WHERE Title LIKE :search
 ORDER BY Title, Store;
 """)
 
-# Öppnar databaskopplingen och exekverar SQL-frågan.
-with engine.connect() as connection:
-    result = connection.execute(query, {"search": f"%{search_term}%"})
-    rows = result.fetchall()
+# try-except -block för att hantera potentiella fel vid inloggning och input från användaren.
+try:
+    # Öppnar databaskopplingen och verifierar att inloggningen fungerar.
+    with engine.connect() as connection:
+        
+        search_term = input("Sök efter boktitel: ")
 
-    # Skriver ut meddelande om inga böcker hittades.
-    if not rows:
-        print("Inga böcker matchade din sökning.")
+        # Exekverar SQL-frågan med parameteriserad sökning.
+        result = connection.execute(query, {"search": f"%{search_term}%"})
+        rows = result.fetchall()
 
-    # Skriver annars ut resultaten i läsbart format.
-    else:
-        for row in rows:
-            print(f"""
-Title: {row.Title}
-ISBN13: {row.ISBN13}
-Store: {row.Store}
-Quantity: {row.Quantity}
--------------------------
+        if not rows:
+            print("Inga böcker matchade din sökning.")
+        else:
+            for row in rows:
+                print(f"""
+                    Title: {row.Title}
+                    ISBN13: {row.ISBN13}
+                    Store: {row.Store}
+                    Quantity: {row.Quantity}
+                    -------------------------
+                    """)
+
+# Hanterar fel vid felaktigt användarnamn/lösenord eller anslutningsproblem.
+except (OperationalError, InterfaceError) as e:
+    print("""
+Fel vid inloggning eller anslutning till databasen.
+Kontrollera lösenordet och försök igen.
 """)
